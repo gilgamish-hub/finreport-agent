@@ -163,16 +163,21 @@ def key_for(cfg: ModelConfig):
     return (own_keys.get(cfg.key_env) or env_key(cfg.key_env)) if cfg.key_env else None
 
 
-def render_answer(result: dict, note: str, question: str, gold: str | None):
+def md(text: str) -> str:
+    """Escape dollar signs: Streamlit renders text between two $ as a maths formula."""
+    return text.replace("$", "\\$")
+
+
+def render_answer(result: dict, note: str, question: str, gold: str | None, show_steps: bool = True):
     if note:
         st.caption(note)
-    if result.get("trace"):
+    if show_steps and result.get("trace"):
         with st.expander(f"The agent's steps ({len(result['trace'])})", expanded=False):
             for step in result["trace"]:
                 st.markdown("- " + describe(step))
     if result.get("status") == "answered":
         with st.container(border=True):
-            st.markdown(result["answer"])
+            st.markdown(md(result["answer"]))
         pages = result.get("pages", [])
         if pages:
             links = [f"[p. {p + 1}]({report.link}#page={p + 1})" if report else f"p. {p + 1}" for p in pages]
@@ -188,7 +193,7 @@ def render_answer(result: dict, note: str, question: str, gold: str | None):
         st.markdown(f"### {config.NOT_FOUND}")
         st.caption("The agent could not find (or could not verify) the answer in this report.")
     if gold:
-        st.info(f"FinanceBench reference answer: {gold}")
+        st.info(md(f"FinanceBench reference answer: {gold}"))
 
 
 def queue_live(question, gold):
@@ -275,7 +280,7 @@ def answer_question(question: str, gold: str | None, force_live: bool = False):
         if not own:
             st.session_state.live_count = st.session_state.get("live_count", 0) + 1
         answer_cache().put(doc, question, result)
-        render_answer(result, "", question, gold)
+        render_answer(result, "", question, gold, show_steps=False)   # the steps were just shown live
 
 
 # ---------- sidebar ----------
@@ -393,14 +398,14 @@ with eval_tab:
                         format_func=lambda i: f"{i.replace('financebench_id_', '')} · {any_rows[i]['question'][:100]}")
     q = any_rows[pick]
     st.markdown(f"**{q['question']}**")
-    st.markdown(f"Reference answer: {q['gold']}  \nEvidence page(s): "
+    st.markdown(md(f"Reference answer: {q['gold']}") + "  \nEvidence page(s): "
                 f"{', '.join(str(p + 1) for p in q['gold_pages'])} of `{q['doc_name']}`")
     for v, col in zip(by_id, st.columns(len(by_id))):
         r = by_id[v][pick]
         with col:
             st.markdown(f"**{VARIANTS[v]}** · {LABEL_ICON[r['label']]}")
             with st.container(border=True):
-                st.markdown(r["answer"][:2000])
+                st.markdown(md(r["answer"][:2000]))
             st.caption(f"Cited pages: {', '.join(str(p + 1) for p in r['pages']) or '-'} · "
                        f"{r['llm_calls']} LLM calls · {r['seconds']:.0f}s")
             if r.get("calcs"):
