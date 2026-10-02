@@ -3,6 +3,8 @@
 Ask questions about real company filings (10-Ks, 10-Qs, earnings releases) and get answers with the
 numbers worked out and the source pages cited.
 
+**Live demo: [finreport-agent.streamlit.app](https://finreport-agent.streamlit.app/)**
+
 > "What was 3M's capital expenditure in FY2018?" → **$1,577 million**, cash flow statement, p. 60
 
 Built with **LangGraph** (agent control flow) and **LangChain** (PDF loading, splitting, embeddings,
