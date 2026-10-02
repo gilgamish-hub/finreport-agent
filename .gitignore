@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.streamlit/secrets.toml
+data/
+*.part
+
+# run logs (contain org ids, key suffixes and local paths)
+results/*.txt

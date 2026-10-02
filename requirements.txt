@@ -1,0 +1,21 @@
+# CPU-only PyTorch: the default Linux build pulls ~2 GB of CUDA libraries a free host cannot use
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+langchain>=1.2
+langchain-core>=1.3
+langgraph>=1.1
+langchain-google-genai>=4.0
+langchain-groq>=1.1
+langchain-chroma>=1.1
+langchain-huggingface>=1.2
+langchain-text-splitters>=1.0
+chromadb>=1.5
+sentence-transformers>=5.0
+pymupdf>=1.26
+rank-bm25>=0.2.2
+datasets>=4.0
+requests
+python-dotenv
+streamlit>=1.50
+pytest
+# optional, to run fully offline: pip install langchain-ollama
