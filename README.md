@@ -162,7 +162,7 @@ The app is built to stay usable on free-tier API quotas:
 The full index (84 filings, ~440 MB) is too big for free hosting, so `scripts/build_demo_index.py`
 copies the 12 filings with the most evaluated questions (78 MB, no re-embedding) into
 `data/demo_chroma`. On the host, set `FINAGENT_CHROMA_DIR=data/demo_chroma` and
-`FINAGENT_INDEX_REPO=<user>/<dataset>`; on first start the app downloads the index from that Hugging
+`FINAGENT_INDEX_REPO=GILGAMISH/finreport-demo-index` ([dataset](https://huggingface.co/datasets/GILGAMISH/finreport-demo-index)); on first start the app downloads the index from that Hugging
 Face dataset.
 
 Evaluation results are appended to `results/<variant>.jsonl` after every question, so a run stopped

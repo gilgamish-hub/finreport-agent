@@ -10,8 +10,16 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from finagent import config
-from finagent.data import load_questions, load_reports
+# On Streamlit Cloud, settings arrive as secrets; finagent reads them from the environment at import time.
+try:
+    for _name, _value in st.secrets.items():
+        if isinstance(_value, str):
+            os.environ.setdefault(_name, _value)
+except Exception:   # no secrets.toml (local runs use .env)
+    pass
+
+from finagent import config  # noqa: E402
+from finagent.data import load_questions, load_reports  # noqa: E402
 from finagent.demo import (DEMO_CHAIN, AllModelsBusy, AnswerCache, ModelConfig, ensure_index,
                            load_saved_runs, normalize, run_with_fallback)
 from finagent.evaluate import load_results, summarize
