@@ -143,9 +143,35 @@ python scripts/download_pdfs.py       # 84 filings, ~160 MB
 python scripts/build_index.py         # embeds on CPU, ~2-3 h for all; or --docs 3M_2018_10K
 streamlit run app.py                  # choose Groq, Gemini or a local Ollama model in the sidebar
 
-python -m pytest                      # 33 offline tests (scripted LLM, no API calls)
+python -m pytest                      # 37 offline tests (scripted LLM, no API calls)
 python scripts/run_eval.py --variants baseline agent agent_nocalc --sample 30
 python scripts/report.py
+```
+
+## API
+
+The agent is also served as a REST API (`finagent/api.py`, FastAPI), so other software can use it:
+
+| Endpoint | What it does |
+|---|---|
+| `GET /health` | Service status and number of indexed reports |
+| `GET /reports` | Report names you can ask about |
+| `POST /ask` | `{"question", "doc_name"}` in; answer, status, cited pages, calculations and time out |
+| `POST /ask/stream` | Same, but every agent step (plan, search, grade, calculator, verify) is sent as it happens, as server-sent events |
+
+Requests and responses are validated with Pydantic (unknown report: 404, malformed request: 422). The graph
+and index load once at startup, and slow agent runs execute in worker threads so they don't block other requests.
+
+```bash
+uvicorn finagent.api:app            # then open http://localhost:8000/docs
+
+# or in Docker (CPU-only PyTorch, embedding model baked in, demo index downloaded on first start)
+docker build -t finreport-api .
+docker run -p 8000:8000 --env-file .env finreport-api
+
+curl -X POST localhost:8000/ask -H "Content-Type: application/json" \
+     -d '{"question": "What was the FY2018 capital expenditure amount (in USD millions) for 3M?", "doc_name": "3M_2018_10K"}'
+# {"answer": "The FY2018 capital expenditure (capital spending) was $1,577 million.", "status": "answered", "pages": [39, 49], ...}
 ```
 
 ## The hosted demo
@@ -187,8 +213,10 @@ finagent/
   baseline.py    plain RAG for comparison
   evaluate.py    LLM judge and metrics
   demo.py        saved runs, answer cache, model fallback, index download for the hosted demo
+  api.py         FastAPI service: /ask, streaming /ask/stream, /reports, /health
 scripts/         download, index, demo index, evaluate, report
-tests/           routing, tools, ingestion, demo tests
+tests/           routing, tools, ingestion, demo, API tests
+Dockerfile       container for the API
 app.py           Streamlit UI: ask a filing (live agent trace, page links) and browse the evaluation
 ```
 

@@ -8,3 +8,4 @@ data/
 
 # run logs (contain org ids, key suffixes and local paths)
 results/*.txt
+build.log

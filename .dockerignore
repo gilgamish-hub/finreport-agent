@@ -1,0 +1,12 @@
+# Keep the build context small and never copy secrets into the image
+.env
+.streamlit/secrets.toml
+.git
+data/
+results/
+tests/
+scripts/
+app.py
+__pycache__/
+*.pyc
+.pytest_cache/
