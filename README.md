@@ -19,12 +19,21 @@ laptop GPU (both statistically significant). Overall it improves the 4B model fr
 (significant) and `gpt-oss-120b` from 59% to 63% (not significant: it loses ground on qualitative
 questions). [Details below](#results).
 
+**Routing** lookups to plain RAG and everything else to the agent scores **67.6%** with `gpt-oss-120b`
+(vs 58.6% plain RAG, p = 0.02, and 63.4% agent-only) while using 15% fewer tokens than the agent
+([estimate from the saved runs](#routing)). It is the default in the API, the MCP server and the demo.
+
+Also served as a **FastAPI** service with streaming (Docker image included) and as an **MCP server**,
+so Claude Desktop or any other MCP client can search the filings and run the agent.
+
 ## How the agent works
 
 ```mermaid
 graph TD;
 	START([start]) --> classify;
-	classify --> retrieve;
+	classify -.->|lookup, routing on| rag;
+	rag --> END;
+	classify -.-> retrieve;
 	retrieve --> grade;
 	grade -.->|enough evidence| reason;
 	grade -.->|missing something| rewrite;
@@ -41,6 +50,7 @@ graph TD;
 | Step | What it does |
 |---|---|
 | **classify** | Labels the question *lookup / calculate / compare* and writes one search query per figure needed, in 10-K wording ("purchases of property, plant and equipment", not "capex"). |
+| **rag** | With routing on (`route_lookups=True`), a plain lookup skips the loop: one search, one answer. |
 | **retrieve** | Hybrid search inside the chosen report: dense (`bge-small-en-v1.5` in Chroma) + BM25, fused with reciprocal rank fusion. BM25 catches exact line-item names that embeddings miss. |
 | **grade** | The LLM marks which passages are relevant and whether they cover *every* figure needed. |
 | **rewrite** | If something is missing, new queries target exactly that, with different terminology. Up to 3 search rounds. |
@@ -121,9 +131,26 @@ What this shows:
 - One gpt-oss-120b agent run failed on every retry (the model kept returning invalid JSON); it is
   counted as wrong.
 
-The obvious next step is routing: send numerical questions through the agent and qualitative ones
-through a lighter path. That has to be tuned on separate questions to be a fair claim, since all 145
-here are used for the evaluation.
+### Routing
+
+The results above suggest a router: the agent's own *classify* step already labels every question, so
+lookups can go to plain RAG and calculations and comparisons to the agent. Both paths were run on all 145
+questions, so `scripts/simulate_router.py` computes what the router would have scored without new API
+calls (the routed lookups are charged for the extra classify call, ~1k tokens, measured):
+
+| | Plain RAG | Agent | **Router** |
+|---|---|---|---|
+| **gpt-oss-120b**: correct | 58.6% | 63.4% | **67.6%** |
+| wrong / refused | 16.6% / 24.8% | 25.5% / 11.0% | 21.4% / 11.0% |
+| LLM calls · tokens per question | 1.0 · 3.2k | 5.0 · 10.5k | 4.2 · 9.0k |
+| **qwen3.5 4B**: correct | 46.2% | **62.1%** | 60.0% |
+
+- With gpt-oss-120b the router beats plain RAG (20 wins / 7 losses, p = 0.019) and the agent alone
+  (10 / 4, p = 0.18, not significant), at 15% fewer tokens than the agent.
+- With the 4B model routing does not help (3 / 6 vs the agent): a small model benefits from the full
+  loop even on lookups. Use `mode="agent"` for small models.
+- Caveat: the rule was suggested by these same results, so this is an estimate, not a held-out result.
+  `python scripts/run_eval.py --variants router` runs it for real. Full output: [results/ROUTER.md](results/ROUTER.md).
 
 The first 30-question run (the starting point of this sample) looked better for the agent with
 gpt-oss-120b (+17 points) because plain RAG happened to do badly on those 30 (47% vs 62% on the other
@@ -143,7 +170,7 @@ python scripts/download_pdfs.py       # 84 filings, ~160 MB
 python scripts/build_index.py         # embeds on CPU, ~2-3 h for all; or --docs 3M_2018_10K
 streamlit run app.py                  # choose Groq, Gemini or a local Ollama model in the sidebar
 
-python -m pytest                      # 37 offline tests (scripted LLM, no API calls)
+python -m pytest                      # 46 offline tests (scripted LLM, no API calls)
 python scripts/run_eval.py --variants baseline agent agent_nocalc --sample 30
 python scripts/report.py
 ```
@@ -156,11 +183,17 @@ The agent is also served as a REST API (`finagent/api.py`, FastAPI), so other so
 |---|---|
 | `GET /health` | Service status and number of indexed reports |
 | `GET /reports` | Report names you can ask about |
-| `POST /ask` | `{"question", "doc_name"}` in; answer, status, cited pages, calculations and time out |
+| `POST /ask` | `{"question", "doc_name", "mode"}` in; answer, status, cited pages, route taken, calculations, seconds, LLM calls and tokens out |
 | `POST /ask/stream` | Same, but every agent step (plan, search, grade, calculator, verify) is sent as it happens, as server-sent events |
+| `GET /metrics` | Requests by route and status, errors, average and max latency, LLM calls and tokens since start |
 
-Requests and responses are validated with Pydantic (unknown report: 404, malformed request: 422). The graph
-and index load once at startup, and slow agent runs execute in worker threads so they don't block other requests.
+- `mode`: `auto` (default) routes lookups to plain RAG; `agent` always runs the full loop.
+- Requests and responses are validated with Pydantic (unknown report: 404, malformed request: 422).
+- Set `FINAGENT_API_KEY` to require an `X-API-Key` header (constant-time comparison); `/health` stays open.
+- Provider rate limits return 503 with a clear message; every request is logged as one JSON line
+  (route, status, seconds, calls, tokens).
+- The graphs and index load once at startup; slow agent runs execute in worker threads so they don't
+  block other requests.
 
 ```bash
 uvicorn finagent.api:app            # then open http://localhost:8000/docs
@@ -171,7 +204,33 @@ docker run -p 8000:8000 --env-file .env finreport-api
 
 curl -X POST localhost:8000/ask -H "Content-Type: application/json" \
      -d '{"question": "What was the FY2018 capital expenditure amount (in USD millions) for 3M?", "doc_name": "3M_2018_10K"}'
-# {"answer": "The FY2018 capital expenditure (capital spending) was $1,577 million.", "status": "answered", "pages": [39, 49], ...}
+# {"answer": "FY 2018 capital expenditure (capital spending) was **$1,577 million**.", "status": "answered",
+#  "pages": [39], "route": "rag", "llm_calls": 2, "tokens": 4209, "seconds": 8.4, ...}
+```
+
+## MCP server
+
+`finagent/mcp_server.py` exposes FinReport over the [Model Context Protocol](https://modelcontextprotocol.io),
+so an MCP client's own model can work with the filings:
+
+| Tool | Needs an LLM key on the server? |
+|---|---|
+| `list_reports` | no |
+| `search_report(doc_name, query, k)`: hybrid search, passages with page numbers | no |
+| `read_page(doc_name, page)`: full page text, table rows intact | no |
+| `calculate(expression)`: the agent's AST-safe calculator | no |
+| `ask_report(question, doc_name, mode)`: the whole agent, answer with cited pages | yes |
+
+```bash
+python -m finagent.mcp_server                       # stdio
+python -m finagent.mcp_server --http --port 8001    # streamable HTTP at /mcp
+```
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{"mcpServers": {"finreport": {"command": "python", "args": ["-m", "finagent.mcp_server"],
+                              "env": {"PYTHONPATH": "/path/to/finreport-agent"}}}}
 ```
 
 ## The hosted demo
@@ -213,9 +272,10 @@ finagent/
   baseline.py    plain RAG for comparison
   evaluate.py    LLM judge and metrics
   demo.py        saved runs, answer cache, model fallback, index download for the hosted demo
-  api.py         FastAPI service: /ask, streaming /ask/stream, /reports, /health
-scripts/         download, index, demo index, evaluate, report
-tests/           routing, tools, ingestion, demo, API tests
+  api.py         FastAPI service: /ask, streaming /ask/stream, /metrics, /reports, /health
+  mcp_server.py  MCP server: search, read page, calculate, ask
+scripts/         download, index, demo index, evaluate, report, router estimate
+tests/           graph routing, tools, ingestion, demo, API and MCP tests
 Dockerfile       container for the API
 app.py           Streamlit UI: ask a filing (live agent trace, page links) and browse the evaluation
 ```

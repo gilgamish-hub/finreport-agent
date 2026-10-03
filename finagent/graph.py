@@ -1,5 +1,6 @@
 """The LangGraph agent.
 
+    classify --(route_lookups and a plain lookup)--> rag (one search, one answer) -> END
     classify -> retrieve -> grade --(not enough, rounds left)--> rewrite -> retrieve ...
                               |--(enough)--> reason <-> calculator
                               |--(nothing found)--> not_found
@@ -87,11 +88,14 @@ def _is_not_found(answer: str) -> bool:
 
 
 def build_graph(main_llm, fast_llm, search_fn=None, expand_fn=None, use_calculator: bool = True,
-                verify: bool = True):
+                verify: bool = True, route_lookups: bool = False, rag_search_fn=None):
     """Compile the agent.
 
     search_fn(queries, doc_name) -> chunks   defaults to hybrid retrieval
     expand_fn(chunks) -> pages               defaults to full-page expansion (identity if search_fn is given)
+    route_lookups                            send questions classified as a plain lookup to plain RAG
+                                             (one search, one LLM call) instead of the full loop
+    rag_search_fn(query, doc_name, k)        search used by that RAG path (defaults to hybrid search)
     """
     if search_fn is None:
         from finagent.retriever import expand_to_pages, search_many
@@ -132,6 +136,18 @@ def build_graph(main_llm, fast_llm, search_fn=None, expand_fn=None, use_calculat
         return {"kept": kept, "missing": "" if g.sufficient else g.missing,
                 "trace": [{"step": "grade", "relevant_pages": sorted({c.metadata["page"] + 1 for c in picked}),
                            "sufficient": g.sufficient, "missing": g.missing}]}
+
+    def after_classify(s: AgentState) -> str:
+        return "rag" if route_lookups and s.get("qtype") == "lookup" else "retrieve"
+
+    def rag(s: AgentState):
+        # The evaluation showed the full loop pays off on calculations and comparisons, while plain RAG
+        # is as good or better on single-fact lookups at a third of the cost.
+        from finagent.baseline import run_baseline   # local import: baseline imports this module
+
+        res = run_baseline(main_llm, s["question"], s["doc_name"], search_fn=rag_search_fn)
+        return {"answer": res["answer"], "pages": res["pages"], "status": res["status"],
+                "trace": [{"step": "rag", "pages": [p + 1 for p in res["retrieved_pages"]]}]}
 
     def after_grade(s: AgentState) -> str:
         if s["kept"] and not s["missing"]:
@@ -249,9 +265,11 @@ def build_graph(main_llm, fast_llm, search_fn=None, expand_fn=None, use_calculat
     g.add_node("calculator", run_calculator)
     g.add_node("verify", check)
     g.add_node("not_found", not_found)
+    g.add_node("rag", rag)
 
     g.add_edge(START, "classify")
-    g.add_edge("classify", "retrieve")
+    g.add_conditional_edges("classify", after_classify, ["retrieve", "rag"])
+    g.add_edge("rag", END)
     g.add_edge("retrieve", "grade")
     g.add_conditional_edges("grade", after_grade, ["reason", "rewrite", "not_found"])
     g.add_edge("rewrite", "retrieve")
@@ -270,6 +288,7 @@ def run_agent(graph, question: str, doc_name: str, callbacks=None) -> dict:
         "status": final.get("status", "not_found"),
         "pages": final.get("pages", []),
         "qtype": final.get("qtype"),
+        "route": "rag" if any(t.get("step") == "rag" for t in final.get("trace", [])) else "agent",
         "calcs": final.get("calcs", []),
         "retrieved_pages": sorted({c.metadata["page"] for c in final.get("kept", [])}),
         "trace": final.get("trace", []),

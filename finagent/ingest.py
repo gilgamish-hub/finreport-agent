@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF ("import fitz" prints a deprecation notice to stdout)
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 

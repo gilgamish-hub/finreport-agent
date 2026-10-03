@@ -20,5 +20,6 @@ streamlit>=1.50
 fastapi>=0.115
 uvicorn>=0.30
 httpx
+mcp>=2.0
 pytest
 # optional, to run fully offline: pip install langchain-ollama

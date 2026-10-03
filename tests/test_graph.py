@@ -33,6 +33,9 @@ class ScriptedLLM:
     def bind_tools(self, tools):
         return RunnableLambda(lambda _: self.replies.pop(0))
 
+    def invoke(self, prompt, config=None):   # plain call, used by the RAG path
+        return self.replies.pop(0)
+
 
 def call(name, args, id_):
     return {"name": name, "args": args, "id": id_, "type": "tool_call"}
@@ -146,3 +149,33 @@ def test_reasoning_sees_expanded_pages():
 
     assert "FULL PAGE" in seen[0]
     assert out["pages"] == [59]
+
+
+def test_router_sends_lookups_to_plain_rag():
+    fast = ScriptedLLM(structured=[Plan(qtype="lookup", queries=["capex 2018"])])
+    main = ScriptedLLM(replies=[AIMessage("3M's FY2018 capital expenditure was $1,577 million.\nPages: 60")])
+    graph = build_graph(main, fast, search_fn=fake_search([]), route_lookups=True,
+                        rag_search_fn=lambda question, doc_name, k=8: [CASHFLOW])
+    out = run_agent(graph, "What was 3M's capex in FY2018?", "3M_2018_10K")
+
+    assert out["route"] == "rag"
+    assert out["answer"] == "3M's FY2018 capital expenditure was $1,577 million."
+    assert out["pages"] == [59]
+    assert [t["step"] for t in out["trace"]] == ["classify", "rag"]
+
+
+def test_router_keeps_calculations_in_the_agent():
+    fast = ScriptedLLM(structured=[
+        Plan(qtype="calculate", queries=["capex 2018", "capex 2017"]),
+        Grade(relevant=[0], sufficient=True),
+    ])
+    main = ScriptedLLM(replies=[
+        AIMessage("", tool_calls=[call("calculator", {"expression": "(1577-1373)/1373*100"}, "c1")]),
+        AIMessage("", tool_calls=[call("submit_answer", {"answer": "Capex rose 14.86% to $1,577 million.",
+                                                          "pages": [60]}, "s1")]),
+    ])
+    graph = build_graph(main, fast, search_fn=fake_search([[CASHFLOW, NOISE]]), route_lookups=True,
+                        rag_search_fn=lambda *a, **k: [])
+    out = run_agent(graph, "How much did 3M's capex grow in FY2018?", "3M_2018_10K")
+
+    assert out["route"] == "agent" and out["status"] == "answered"

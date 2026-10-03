@@ -26,7 +26,7 @@ from finagent.graph import build_graph, run_agent  # noqa: E402
 from finagent.ingest import indexed_docs  # noqa: E402
 from finagent.llm import CallCounter, get_llm  # noqa: E402
 
-VARIANTS = ["agent", "agent_nocalc", "baseline"]
+VARIANTS = ["agent", "agent_nocalc", "baseline", "router"]
 
 # Questions inspected while debugging and tuning prompts. They are kept out of --sample so the
 # reported numbers come from questions the prompts were not tuned on.
@@ -76,6 +76,7 @@ def main():
     graphs = {
         "agent": build_graph(main_llm, fast_llm, use_calculator=True),
         "agent_nocalc": build_graph(main_llm, fast_llm, use_calculator=False),
+        "router": build_graph(main_llm, fast_llm, route_lookups=True),
     }
     config.RESULTS_DIR.mkdir(exist_ok=True)
 

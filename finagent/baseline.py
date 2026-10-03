@@ -18,7 +18,7 @@ def run_baseline(llm, question: str, doc_name: str, search_fn=None, k: int = 8, 
     chunks = search_fn(question, doc_name, k=k)
     msg = llm.invoke(prompts.BASELINE.format(
         doc_name=doc_name, not_found=config.NOT_FOUND, evidence=format_chunks(chunks), question=question),
-        config={"callbacks": callbacks or []})
+        config={"callbacks": callbacks} if callbacks else None)  # None keeps callbacks inherited from a graph run
     text = msg.text if hasattr(msg, "text") else str(msg.content)
 
     pages = []
