@@ -331,6 +331,10 @@ ask_tab, eval_tab = st.tabs(["Ask a report", "Evaluation results"])
 with ask_tab:
     st.write("A LangGraph agent searches the filing, checks it found the right passages, does the maths "
              "with a calculator tool, verifies the numbers and cites its pages.")
+    st.caption("Also running as a [FastAPI service on Azure](https://finreport-api.wittytree-d81b0e1e.centralindia."
+               "azurecontainerapps.io/docs) and as an [MCP server](https://github.com/gilgamish-hub/finreport-agent"
+               "#mcp-server) for Claude Desktop and other agents · [code and evaluation]"
+               "(https://github.com/gilgamish-hub/finreport-agent)")
 
     examples = questions_by_doc().get(doc, [])
     if examples:
