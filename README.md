@@ -3,7 +3,8 @@
 Ask questions about real company filings (10-Ks, 10-Qs, earnings releases) and get answers with the
 numbers worked out and the source pages cited.
 
-**Live demo: [finreport-agent.streamlit.app](https://finreport-agent.streamlit.app/)**
+**Live demo: [finreport-agent.streamlit.app](https://finreport-agent.streamlit.app/)** ·
+**Live API: [docs on Azure](https://finreport-api.wittytree-d81b0e1e.centralindia.azurecontainerapps.io/docs)**
 
 > "What was 3M's capital expenditure in FY2018?" → **$1,577 million**, cash flow statement, p. 60
 
@@ -23,7 +24,7 @@ questions). [Details below](#results).
 (vs 58.6% plain RAG, p = 0.02, and 63.4% agent-only) while using 15% fewer tokens than the agent
 ([estimate from the saved runs](#routing)). It is the default in the API, the MCP server and the demo.
 
-Also served as a **FastAPI** service with streaming (Docker image included) and as an **MCP server**,
+Also served as a **FastAPI** service with streaming, deployed in Docker on **Azure Container Apps**, and as an **MCP server**,
 so Claude Desktop or any other MCP client can search the filings and run the agent.
 
 ## How the agent works
@@ -206,6 +207,21 @@ curl -X POST localhost:8000/ask -H "Content-Type: application/json" \
      -d '{"question": "What was the FY2018 capital expenditure amount (in USD millions) for 3M?", "doc_name": "3M_2018_10K"}'
 # {"answer": "FY 2018 capital expenditure (capital spending) was **$1,577 million**.", "status": "answered",
 #  "pages": [39], "route": "rag", "llm_calls": 2, "tokens": 4209, "seconds": 8.4, ...}
+```
+
+### Deployed on Azure
+
+The same Docker image runs on **Azure Container Apps** (Central India):
+[finreport-api…azurecontainerapps.io/docs](https://finreport-api.wittytree-d81b0e1e.centralindia.azurecontainerapps.io/docs).
+
+- 1 vCPU, 2 GiB, scales to zero when idle and to at most one replica, so it costs almost nothing; the
+  first request after a quiet period waits for the container to start.
+- The image lives in Azure Container Registry; the Groq key and the API key are Container Apps secrets.
+- `/health` and `/docs` are public; the other endpoints need the `X-API-Key` header (ask me for a key).
+
+```bash
+az acr login -n <registry> && docker push <registry>.azurecr.io/finreport-api:v2
+az containerapp create -n finreport-api -g <group> --environment <env> --image <registry>.azurecr.io/finreport-api:v2   --target-port 8000 --ingress external --cpu 1 --memory 2Gi --min-replicas 0 --max-replicas 1   --secrets groq-key=<key> api-key=<key> --env-vars GROQ_API_KEY=secretref:groq-key FINAGENT_API_KEY=secretref:api-key
 ```
 
 ## MCP server
